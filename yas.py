@@ -19,6 +19,7 @@
 # [x] Detect DC in host formatter (?)
 # [x] Save found hosts to a file
 # [] Add network graph generation
+#[] Add DNS monitor
 
 import argparse
 from collections import Counter
@@ -252,6 +253,7 @@ def summary_bssids(pkts, res):
     print("")
 
 def summary_host_write(pkts, res):
+    table_data = [[]]
     found_hosts = []
     for pkt in pkts:
         if pkt.haslayer(IP):
