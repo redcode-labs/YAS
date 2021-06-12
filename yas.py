@@ -30,13 +30,20 @@ import subprocess
 import netifaces
 import time
 import os
+import re
 from dns import reversename, resolver
 from terminaltables import SingleTable
 import ipaddress
+from termcolor import colored
 
 conf.verb = 0
 packet_counts = Counter()
-s = bold(cyan("#"))
+s = green("--")
+
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    return s.getsockname()[0]
 
 def host_formatter(host, pkts):
     gateway_ip = netifaces.gateways()["default"][2][0]
@@ -163,12 +170,14 @@ def summary_arp_mon(pkts, res):
             return f"{green('>')} Request: {pkt[ARP].psrc} is asking about {pkt[ARP].pdst}"
         if pkt[ARP].op == 2: 
             return f"{red('<')} Response: {pkt[ARP].hwsrc} has address {pkt[ARP].hwdst}"
+        if pkt[ARP].op == 2 and pkt[ARP].psrc == pkt[ARP].pdst:
+            return f"{blue('*')} Cache exchange: {pkt[ARP].psrc}"
     for pkt in pkts:
         if pkt.haslayer(ARP):
             table_data.append([arp_mon_display(pkt)])
     print(f"{s} ARP monitor {s}")
     #if any(pkt.haslayer(ARP) for pkt in pkts):
-    if len(table_data) == 0:
+    if len(table_data) != 0:
         table = SingleTable(table_data[1:])
     else:
         table = SingleTable([[red("No packets with ARP layer")]])
@@ -259,12 +268,18 @@ def summary_host_write(pkts, res):
         if pkt.haslayer(IP):
             found_hosts.append(pkt[IP].src)
             found_hosts.append(pkt[IP].dst) 
+    print(found_hosts)
     found_hosts = set(found_hosts) 
+    try:
+        found_hosts = found_hosts.remove("255.255.255.255")
+        found_hosts = found_hosts.remove(get_local_ip())
+    except:
+        pass
     for h in found_hosts:
         table_data.append(host_formatter(h, pkts))
     print(f"{s} Hosts {s}")
     #if any(pkt.haslayer(ARP) for pkt in pkts):
-    if len(table_data) == 0:
+    if len(table_data) != 0:
         table = SingleTable(table_data[1:])
     else:
         table=SingleTable([[red("No hosts found")]])
@@ -304,6 +319,21 @@ def summary_http_requests(pkts, res):
             out_file.write(f"\n{table.table}\n")
     print("")
 
+def summary_network(res):
+    p = subprocess.Popen(["iwconfig", res.IFACE], stdout=subprocess.PIPE)
+    output = p.communicate()[0].decode("utf-8")
+    #try:
+    quality = re.search('Link Quality=(.*)/..', output).group(1)
+    essid = re.search('ESSID:"(.*)"', output).group(1)
+    wifi_power = (int(quality[0])*4 * colored("+", "green")) + ((7-int(quality[0]))*4 * colored("=", "white", attrs=["dark"]))
+    table = SingleTable([[f"ESSID : {blue(essid)}\nSIGNAL: {wifi_power}"]])
+    #except:
+        #table = SingleTable([[red("Cannot obtain signal strength")]])
+    table.inner_heading_row_border = False
+    print(f"{s} Network stats {s}")
+    print(table.table)
+    print("")
+
 def print_summary(pkts, res):
     print("")
     print_info(f"Sniffer stopped ({time.strftime('%X')})")
@@ -329,6 +359,8 @@ def print_summary(pkts, res):
         summary_host_write(pkts, res)
     if res.HTTP or res.SUMMARY_FULL:
         summary_http_requests(pkts, res)
+    if res.NETWORK or res.SUMMARY_FULL:
+        summary_network(res)
 
 def packet_processor(pkt):
     if pkt.haslayer(IP):
@@ -340,7 +372,8 @@ def packet_processor(pkt):
     key = tuple(sorted([src, dst]))
     packet_counts.update([key])
     pkt_no = sum(packet_counts.values())
-    print(f"#{pkt_no} {pkt.summary()}")
+    gateway = netifaces.gateways()["default"][2][0]
+    print(f"* {yellow(pkt_no)} {pkt.summary().replace(get_local_ip(), green(get_local_ip())).replace(gateway, blue(gateway))}")
 
 def packet_processor_quiet(pkt):
     if pkt.haslayer(IP):
@@ -382,6 +415,7 @@ def arguments():
     summary_args.add_argument("-E", "--eapol", dest="EAPOL", action="store_true", help="Extract sensitive EAPOL data")
     summary_args.add_argument("-B", "--bssid", dest="BSSID", action="store_true", help="Show local access points")
     summary_args.add_argument("-P", "--pattern", dest="PATTERN", action="store", metavar="<regex>", help="Search for a regex pattern")
+    summary_args.add_argument("-N", "--network", dest="NETWORK", action="store_true", help="Show basic wireless network stats")
     summary_args.add_argument("-F", "--full", dest="SUMMARY_FULL", action="store_true", help="Show full summary")
     summary_args.add_argument("--out", dest="OUTPUT", action="store", metavar="<output_file>", help="Save the summary to a file")
 

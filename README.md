@@ -38,7 +38,10 @@ Run sniffer for 10 minutes on selected interface, and write IP addresses of foun
 `./yas -t 10m -W hosts_file -i wlan0`
 
 
-	
+## Help menu
+<p align="center">
+<img src="screenshot1.png" width="836"/>
+</p>
 
 
 
